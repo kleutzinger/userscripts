@@ -16,7 +16,7 @@
   // Agree to terms of service
   let checkbox = document.querySelector("#accept_ssa");
   checkbox.checked = true;
-  // click Continue buton
+  // click Continue button
   let submit_button = document.querySelector("#register_btn");
   submit_button.click();
 })();
