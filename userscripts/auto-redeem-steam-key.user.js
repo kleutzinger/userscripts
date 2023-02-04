@@ -3,8 +3,8 @@
 // @name        Auto redeem steam key
 // @namespace   https://github.com/kleutzinger/userscripts
 // @match       https://store.steampowered.com/account/registerkey
-// @downloadURL https://raw.githubusercontent.com/
-// @updateURL   https://raw.githubusercontent.com/
+// @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/auto-redeem-steam-key.user.js
+// @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/auto-redeem-steam-key.user.js
 // @grant       none
 // @version     0.1
 // @author      github.com/kleutzinger/
