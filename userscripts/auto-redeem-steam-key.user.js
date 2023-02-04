@@ -6,7 +6,7 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/auto-redeem-steam-key.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/auto-redeem-steam-key.user.js
 // @grant       none
-// @version     0.1
+// @version     0.2
 // @author      github.com/kleutzinger/
 // @description autoclick through the interface when redeeming a steam key
 // @icon        https://store.steampowered.com/favicon.ico
