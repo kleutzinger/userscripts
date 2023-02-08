@@ -7,7 +7,7 @@ Personally, I use violentmonkey on firefox. You will need a userscript manager b
 
 To install any of my scripts, click the name of the userscript below after installing a userscript manager.
 
-## [Auto redeem steam key](https://github.com/kleutzinger/userscripts/raw/main/userscripts/auto-redeem-steam-key.user.js)
+## Auto redeem steam key [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/auto-redeem-steam-key.user.js)
 <p align="center">
   <img src="https://user-images.githubusercontent.com/6435727/216791579-3f219a7b-238d-4508-9890-e1517bb5c577.png" width=40% height=40%>
 </p>
