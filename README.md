@@ -7,7 +7,7 @@ Personally, I use violentmonkey on firefox. You will need a userscript manager b
 
 To install any of my scripts, click the name of the userscript below after installing a userscript manager.
 
-# New York Times crossword helper [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/nyt-crossword-helper.user.js)
+## New York Times crossword helper [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/nyt-crossword-helper.user.js)
 <p align="center">
   <img src="https://user-images.githubusercontent.com/6435727/217959262-4073565c-117b-4db7-9d14-59edef7177a5.png" width=40% height=40%>
 </p>
