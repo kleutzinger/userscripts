@@ -7,7 +7,7 @@
 // @grant       none
 // @version     0.1
 // @author      github.com/kleutzinger/
-// @description Highlights games you already have in your collection on https://gg.deals
+// @description In lists of games on https://gg.deals, this highlights gamesh you already have in your collection. To use, make an account on gg.deals and import your collection here https://gg.deals/collection/
 // @icon https://gg.deals/favicon.ico
 // ==/UserScript==
 
