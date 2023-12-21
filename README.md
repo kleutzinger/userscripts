@@ -34,7 +34,3 @@ When you click a link like https://store.steampowered.com/account/registerkey?ke
 </p>
 
 In lists of games on https://gg.deals, this highlights games you already have in your collection. To use, make an account and import your collection here https://gg.deals/collection
-
-## Github Issues Auto Assign Self [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/github-issues-auto-assign-self.user.js)
-
-Auto assign self when creating new issues on Github where possible.
