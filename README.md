@@ -4,7 +4,8 @@ User scripts can improve your browsing experience, and open a lot of possibiliti
 
 ## How to install a userscript manager
 
-https://github.com/bvolpato/awesome-userscripts#how-to-use
+[Userscrpts general guide](https://rentry.co/userscript-guide)
+
 Personally, I use violentmonkey on firefox. You will need a userscript manager before using any of these userscripts.
 
 To install any of my scripts, click the name of the userscript below after installing a userscript manager.
