@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Letterboxd Add Cast Images
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Add cast images to Letterboxd movie pages from TMDB.
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/letterboxd-add-cast-images.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/letterboxd-add-cast-images.user.js
@@ -90,7 +90,6 @@
           personInfo.release_age = getAge(person.birthday, movie_release_date);
         }
         tmdbCastMap[person.name] = personInfo;
-        console.log(personInfo);
       });
 
       addImageEl(tmdbCastMap);
