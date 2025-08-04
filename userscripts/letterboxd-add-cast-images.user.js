@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Letterboxd Add Cast Images
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Add cast images to Letterboxd movie pages from TMDB.
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/letterboxd-add-cast-images.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/letterboxd-add-cast-images.user.js
@@ -63,7 +63,10 @@
           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQI12NgYAAAAAMAASDVlMcAAAAASUVORK5CYII=";
         img.src = "data:image/png;base64," + empty1x1png;
       }
-      const { release_age } = castMap[name] || {};
+      const { release_age, today_age } = castMap[name] || {};
+      const original_title = el.getAttribute("data-original-title");
+      const new_title = `${original_title} (${today_age || "?"})`
+      el.setAttribute("data-original-title", new_title)
       const age_span = document.createElement("span");
       age_span.textContent += release_age ? ` (${release_age})` : "";
       el.appendChild(age_span);
@@ -88,6 +91,9 @@
         }
         if (person.birthday !== null && movie_release_date !== null) {
           personInfo.release_age = getAge(person.birthday, movie_release_date);
+        }
+        if (person.birthday !== null){
+          personInfo.today_age = getAge(person.birthday)
         }
         tmdbCastMap[person.name] = personInfo;
       });
