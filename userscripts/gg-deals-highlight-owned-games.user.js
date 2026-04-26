@@ -18,12 +18,14 @@
       ...document.querySelectorAll(".game-box-options"),
     ])) {
       // color owned and wishlisted games
+      const OWNED_COLOR = "#036180"
+      const WISHLIST_COLOR = "#008141"
       const selector_colors = [
-        { selector: ".owned-game .deactivate", color: "#1b0ba1" },
-        { selector: ".wishlisted-game .deactivate", color: "darkred" },
+        { selector: ".owned-game .deactivate", color: OWNED_COLOR },
+        { selector: ".wishlisted-game .deactivate", color: WISHLIST_COLOR },
         // Also check for container-level classes
-        { selector: ".owned", color: "#1b0ba1" },
-        { selector: ".wishlisted", color: "darkred" },
+        { selector: ".owned", color: OWNED_COLOR },
+        { selector: ".wishlisted", color: WISHLIST_COLOR },
       ];
       selector_colors.forEach(({ selector, color }) => {
         // Check if wrapper itself has the class (for container-level classes)
