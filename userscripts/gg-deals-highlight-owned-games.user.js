@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-highlight-owned-games.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-highlight-owned-games.user.js
 // @grant       none
-// @version     0.7
+// @version     0.8
 // @author      github.com/kleutzinger/
 // @description In lists of games on https://gg.deals, this highlights games you already have in your collection. To use, make an account on gg.deals and import your collection here https://gg.deals/collection/
 // @icon https://gg.deals/favicon.ico
@@ -13,9 +13,9 @@
 
 (function () {
   function apply() {
-    const OWNED_COLOR = "#036180";
-    const WISHLIST_COLOR = "#008141";
-    const GOOD_GAME_COLOR = WISHLIST_COLOR;
+    const WISHLIST_COLOR = "#036180";
+    const OWNED_COLOR = "#008141";
+    const GOOD_GAME_COLOR =  "#00B240";
     for (
       const wrapper of new Set([
         ...document.querySelectorAll(".game-info-wrapper"),
