@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-highlight-owned-games.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-highlight-owned-games.user.js
 // @grant       none
-// @version     0.8
+// @version     0.9
 // @author      github.com/kleutzinger/
 // @description In lists of games on https://gg.deals, this highlights games you already have in your collection. To use, make an account on gg.deals and import your collection here https://gg.deals/collection/
 // @icon https://gg.deals/favicon.ico
@@ -15,7 +15,11 @@
   function apply() {
     const WISHLIST_COLOR = "#036180";
     const OWNED_COLOR = "#008141";
-    const GOOD_GAME_COLOR =  "#00B240";
+    const RATING_COLORS = [
+      { match: "Overwhelmingly Positive", color: "#00E676" },
+      { match: "Very Positive", color: "#00B240" },
+      { match: "Mostly Positive", color: "#116B36" },
+    ];
     for (
       const wrapper of new Set([
         ...document.querySelectorAll(".game-info-wrapper"),
@@ -50,12 +54,16 @@
         }
       });
 
-      // color positive reviews
+      // color positive reviews & bump rating text size
       const rating_label = wrapper.querySelector("span.reviews-label");
       const rating = rating_label?.innerText.split("(")[0];
-      if (!!rating) {
-        if (rating.includes("Positive")) {
-          rating_label.style.backgroundColor = GOOD_GAME_COLOR;
+      if (!!rating_label) {
+        rating_label.style.fontSize = "1.15em";
+        const rating_color = RATING_COLORS.find(({ match }) =>
+          rating.includes(match)
+        );
+        if (rating_color) {
+          rating_label.style.backgroundColor = rating_color.color;
         }
       }
     }
