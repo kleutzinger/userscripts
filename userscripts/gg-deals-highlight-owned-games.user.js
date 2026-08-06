@@ -5,13 +5,41 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-highlight-owned-games.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-highlight-owned-games.user.js
 // @grant       none
-// @version     0.9
+// @version     1.0
 // @author      github.com/kleutzinger/
 // @description In lists of games on https://gg.deals, this highlights games you already have in your collection. To use, make an account on gg.deals and import your collection here https://gg.deals/collection/
 // @icon https://gg.deals/favicon.ico
 // ==/UserScript==
 
 (function () {
+  // WCAG relative luminance / contrast helpers, used to pick readable text color
+  function relativeLuminance(hex) {
+    const c = hex.replace("#", "");
+    const [r, g, b] = [0, 2, 4].map(
+      (i) => parseInt(c.substring(i, i + 2), 16) / 255
+    );
+    const linearize = (v) =>
+      v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    return (
+      0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
+    );
+  }
+  function contrastRatio(l1, l2) {
+    const [lighter, darker] = l1 > l2 ? [l1, l2] : [l2, l1];
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+  function readableTextColor(bgHex) {
+    const bgLuminance = relativeLuminance(bgHex);
+    const whiteContrast = contrastRatio(bgLuminance, 1);
+    const blackContrast = contrastRatio(bgLuminance, 0);
+    return whiteContrast >= blackContrast ? "#ffffff" : "#000000";
+  }
+  function applyHighlight(el, bgColor) {
+    el.style.backgroundColor = bgColor;
+    el.style.color = readableTextColor(bgColor);
+    el.style.borderRadius = "4px";
+  }
+
   function apply() {
     const WISHLIST_COLOR = "#036180";
     const OWNED_COLOR = "#008141";
@@ -37,7 +65,7 @@
       selector_colors.forEach(({ selector, color }) => {
         // Check if wrapper itself has the class (for container-level classes)
         if (wrapper.classList.contains(selector.replace(".", ""))) {
-          wrapper.style.backgroundColor = color;
+          applyHighlight(wrapper, color);
           return;
         }
 
@@ -46,7 +74,7 @@
         if (span) {
           const is_displayed = window.getComputedStyle(span).display !== "none";
           if (is_displayed) {
-            wrapper.style.backgroundColor = color;
+            applyHighlight(wrapper, color);
             // DEBUG
             // console.log(`applying ${color} to`);
             // console.log(e);
@@ -63,7 +91,7 @@
           rating.includes(match)
         );
         if (rating_color) {
-          rating_label.style.backgroundColor = rating_color.color;
+          applyHighlight(rating_label, rating_color.color);
         }
       }
     }
