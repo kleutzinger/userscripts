@@ -19,16 +19,10 @@
   const MAX_CONCURRENT_FETCHES = 3;
   const STEAM_APP_RE = /store\.steampowered\.com\/(?:app|agecheck\/app)\/(\d+)/;
 
-  const LOG_PREFIX = "[gg-deals-steam-buttons]";
-  const log = (...args) => console.log(LOG_PREFIX, ...args);
-  const warn = (...args) => console.warn(LOG_PREFIX, ...args);
-
   const cache = loadCache();
   const seen = new WeakSet();
   const queue = [];
   let activeFetches = 0;
-
-  log("script loaded");
 
   function loadCache() {
     try {
@@ -63,29 +57,15 @@
   }
 
   async function fetchSteamUrl(gameHref) {
-    log("fetching", gameHref);
     const res = await fetch(gameHref, { credentials: "same-origin" });
-    if (!res.ok) {
-      warn("fetch failed", gameHref, res.status);
-      return null;
-    }
+    if (!res.ok) return null;
     const html = await res.text();
     const m = html.match(STEAM_APP_RE);
-    if (!m) {
-      warn("no steampowered.com app link found in", gameHref);
-      return null;
-    }
-    const url = `https://store.steampowered.com/app/${m[1]}/`;
-    log("found steam url", url, "for", gameHref);
-    return url;
+    return m ? `https://store.steampowered.com/app/${m[1]}/` : null;
   }
 
   function addButton(anchorEl, steamUrl) {
-    if (anchorEl.querySelector(".gg-steam-btn")) {
-      log("button already present, skipping", anchorEl);
-      return;
-    }
-    log("adding button", steamUrl, "to", anchorEl);
+    if (anchorEl.querySelector(".gg-steam-btn")) return;
     if (getComputedStyle(anchorEl).position === "static") {
       anchorEl.style.position = "relative";
     }
@@ -121,7 +101,6 @@
       const stack = document.elementsFromPoint(e.clientX, e.clientY);
       const btn = stack.find((el) => el.classList?.contains("gg-steam-btn"));
       if (!btn) return;
-      log("intercepted click on button, opening", btn.dataset.steamUrl);
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
@@ -139,9 +118,8 @@
           setCached(job.slug, url);
           if (url) addButton(job.anchorEl, url);
         })
-        .catch((err) => {
+        .catch(() => {
           // network error; leave uncached so it's retried on a later visit
-          warn("fetch threw for", job.href, err);
         })
         .finally(() => {
           activeFetches--;
@@ -153,18 +131,13 @@
   function processAnchor(anchorEl) {
     const href = anchorEl.getAttribute("href");
     const slug = href && slugFromHref(href);
-    if (!slug) {
-      warn("couldn't extract slug from href", href, anchorEl);
-      return;
-    }
+    if (!slug) return;
 
     const cached = getCached(slug);
     if (cached !== undefined) {
-      log("cache hit for", slug, "->", cached);
       if (cached) addButton(anchorEl, cached);
       return;
     }
-    log("queueing fetch for", slug);
     queue.push({ anchorEl, slug, href });
     pump();
   }
@@ -174,7 +147,6 @@
       for (const entry of entries) {
         if (entry.isIntersecting) {
           io.unobserve(entry.target);
-          log("thumbnail in view, processing", entry.target.getAttribute("href"));
           processAnchor(entry.target);
         }
       }
@@ -183,16 +155,11 @@
   );
 
   function scan() {
-    const els = document.querySelectorAll('a.main-image[href*="/game/"]');
-    log("scan found", els.length, "a.main-image elements on page");
-    let newCount = 0;
-    els.forEach((el) => {
+    document.querySelectorAll('a.main-image[href*="/game/"]').forEach((el) => {
       if (seen.has(el)) return;
       seen.add(el);
-      newCount++;
       io.observe(el);
     });
-    log("scan is observing", newCount, "new elements");
   }
 
   scan();
