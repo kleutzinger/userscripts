@@ -35,3 +35,7 @@ When you click a link like https://store.steampowered.com/account/registerkey?ke
 </p>
 
 In lists of games on https://gg.deals, this highlights games you already have in your collection. To use, make an account and import your collection here https://gg.deals/collection
+
+## [gg.deals](https://gg.deals) Steam Store Buttons [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js)
+
+Adds a small "Steam" button on each game's thumbnail in lists on https://gg.deals (bundle pages, search results, wishlists, etc.) that links straight to the Steam store page, so you don't have to open the gg.deals game page first.
