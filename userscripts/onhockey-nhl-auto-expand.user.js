@@ -6,9 +6,9 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/onhockey-nhl-auto-expand.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/onhockey-nhl-auto-expand.user.js
 // @grant       none
-// @version     1.0
+// @version     1.1
 // @author      github.com/kleutzinger/
-// @description Auto-expands every game under the NHL section on onhockey.tv, bolds/highlights San Jose Sharks games, and auto-opens the first English-language stream for a Sharks game once its links load.
+// @description Auto-expands every game under the NHL section on onhockey.tv, bolds/highlights San Jose Sharks games, auto-opens the first English-language stream for a Sharks game once its links load, and adds small prev/next buttons to cycle through that game's other streams.
 // ==/UserScript==
 
 (function () {
@@ -34,12 +34,23 @@
     );
   }
 
+  // Forces the row's links div to stay visible regardless of what the site's
+  // own JS does to it (e.g. some sites re-collapse a row once you click one
+  // of its stream links, which would otherwise undo our auto-expand/auto-open).
+  function forceVisible(linksDiv) {
+    linksDiv.classList.remove("sf-hidden");
+    linksDiv.style.display = "block";
+  }
+
   function expandRow(tr, linksDiv) {
-    if (isExpanded(linksDiv)) return;
-    const clickTarget = linksDiv.closest("td") || tr;
-    clickTarget.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
-    );
+    if (!isExpanded(linksDiv) && !linksDiv.dataset.autoExpandClicked) {
+      linksDiv.dataset.autoExpandClicked = "1";
+      const clickTarget = linksDiv.closest("td") || tr;
+      clickTarget.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
+      );
+    }
+    forceVisible(linksDiv);
   }
 
   function highlightSharksRow(tr) {
@@ -77,12 +88,98 @@
     return null;
   }
 
+  function streamName(a) {
+    return a.title || a.textContent.trim() || "stream";
+  }
+
+  function styleNavButton(btn) {
+    btn.type = "button";
+    btn.style.font = "inherit";
+    btn.style.fontSize = "10px";
+    btn.style.lineHeight = "1";
+    btn.style.padding = "2px 5px";
+    btn.style.margin = "0 2px";
+    btn.style.cursor = "pointer";
+    btn.style.border = "1px solid #000";
+    btn.style.borderRadius = "3px";
+    btn.style.background = "#fff";
+    btn.style.color = "#000";
+  }
+
+  // Adds small "<  name  >" prev/next buttons after a game's links div so the
+  // user can cycle through its other available streams by hand.
+  function setupStreamNav(linksDiv, startLink) {
+    if (linksDiv.dataset.navInstalled) return;
+    linksDiv.dataset.navInstalled = "1";
+
+    const bar = document.createElement("div");
+    bar.style.marginTop = "4px";
+    bar.style.fontSize = "11px";
+
+    const prevBtn = document.createElement("button");
+    prevBtn.textContent = "◀";
+    styleNavButton(prevBtn);
+
+    const nextBtn = document.createElement("button");
+    nextBtn.textContent = "▶";
+    styleNavButton(nextBtn);
+
+    const label = document.createElement("span");
+    label.style.margin = "0 6px";
+    label.style.color = "#fff";
+    label.style.fontWeight = "bold";
+
+    bar.appendChild(prevBtn);
+    bar.appendChild(label);
+    bar.appendChild(nextBtn);
+    linksDiv.insertAdjacentElement("afterend", bar);
+
+    let idx = 0;
+
+    function links() {
+      return Array.from(linksDiv.querySelectorAll("a"));
+    }
+
+    function render() {
+      const all = links();
+      if (!all.length) {
+        label.textContent = "no streams";
+        return;
+      }
+      idx = ((idx % all.length) + all.length) % all.length;
+      label.textContent = `${idx + 1}/${all.length} ${streamName(all[idx])}`;
+    }
+
+    function go(delta) {
+      const all = links();
+      if (!all.length) return;
+      idx = ((idx + delta) % all.length + all.length) % all.length;
+      render();
+      all[idx].click();
+      forceVisible(linksDiv);
+    }
+
+    prevBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      go(-1);
+    });
+    nextBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      go(1);
+    });
+
+    if (startLink) idx = links().indexOf(startLink);
+    render();
+  }
+
   function openSharksStream(linksDiv, gameKey) {
-    if (openedGames.has(gameKey)) return;
     const link = pickFirstEnglishLink(linksDiv);
-    if (!link) return;
-    openedGames.add(gameKey);
-    link.click();
+    if (!openedGames.has(gameKey) && link) {
+      openedGames.add(gameKey);
+      link.click();
+      forceVisible(linksDiv);
+    }
+    setupStreamNav(linksDiv, link);
   }
 
   function watchAndOpenSharksStream(linksDiv, gameKey) {
@@ -109,7 +206,7 @@
 
     expandRow(tr, linksDiv);
 
-    if (isSharks && !openedGames.has(tr.textContent.slice(0, 80))) {
+    if (isSharks && !linksDiv.dataset.navInstalled) {
       const gameKey = tr.textContent.slice(0, 80);
       watchAndOpenSharksStream(linksDiv, gameKey);
     }
@@ -133,7 +230,12 @@
     new MutationObserver(() => {
       clearTimeout(pending);
       pending = setTimeout(processNHL, 200);
-    }).observe(table, { childList: true, subtree: true });
+    }).observe(table, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
   }
 
   init();
