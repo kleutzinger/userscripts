@@ -42,4 +42,4 @@ Adds a small "Steam" button on each game's thumbnail in lists on https://gg.deal
 
 ## Discord Server Organizer [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js)
 
-Tools for managing your Discord server list on the web client (https://discord.com/channels/\*). Currently: an "Export Folders" button that downloads your current server/folder layout — names, grouping, and order — as a JSON file. More to come (bulk muting, reordering/regrouping).
+Tools for managing your Discord server list on the web client (https://discord.com/channels/\*). "Organize Servers" opens an in-page icon-grid editor — like a phone home screen — with your real server icons: drag an icon to reorder it, drop it on another icon to bundle both into a new folder, drop it on a folder to add it there, or click a folder to open it and manage its contents. Export the edited layout as JSON when you're done. It's editor-only for now — applying the result back to real Discord isn't implemented yet. More to come (bulk muting, applying the edit back to Discord).
