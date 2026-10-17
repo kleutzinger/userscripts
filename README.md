@@ -39,3 +39,7 @@ In lists of games on https://gg.deals, this highlights games you already have in
 ## [gg.deals](https://gg.deals) Steam Store Buttons [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js)
 
 Adds a small "Steam" button on each game's thumbnail in lists on https://gg.deals (bundle pages, search results, wishlists, etc.) that links straight to the Steam store page, so you don't have to open the gg.deals game page first.
+
+## Discord Server Organizer [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js)
+
+Tools for managing your Discord server list on the web client (https://discord.com/channels/\*). Currently: an "Export Folders" button that downloads your current server/folder layout — names, grouping, and order — as a JSON file. More to come (bulk muting, reordering/regrouping).
