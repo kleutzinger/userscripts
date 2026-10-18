@@ -5,9 +5,9 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js
 // @grant       none
-// @version     2.8
+// @version     3.3
 // @author      github.com/kleutzinger/
-// @description Tools for managing your Discord server list. "Organize Servers" opens an in-page icon-grid editor (real server icons, folders you can open, full undo/redo) to drag/regroup/reorder servers and folders and export the edited layout. More to come (bulk muting, applying the edited layout back to Discord).
+// @description Tools for managing your Discord server list. "Organize Servers" opens an in-page icon-grid editor (real server icons, folders you can open, full undo/redo) to drag/regroup/reorder servers and folders and export the edited layout. "Apply to Discord" writes the edited layout back (with a confirm and an automatic backup).
 // ==/UserScript==
 
 (function () {
@@ -164,6 +164,21 @@
     }
   }
 
+  async function collapseAllFolders() {
+    const expandedIds = getGuildListItems()
+      .filter((el) => isFolder(el) && !isCollapsed(el))
+      .map(getId);
+
+    for (const id of expandedIds) {
+      try {
+        await toggleFolder(id, "false");
+      } catch (e) {
+        console.warn("[discord-server-organizer] failed to collapse folder", id, e);
+      }
+    }
+    return expandedIds.length;
+  }
+
   async function buildExport() {
     await expandAllFolders();
     const items = getGuildListItems();
@@ -184,6 +199,213 @@
     a.remove();
     URL.revokeObjectURL(url);
     return a.download;
+  }
+
+  // ---- Discord internals (for "Apply to Discord") -------------------------
+  //
+  // Found by probing the live client (Oct 2026, Firefox + Violentmonkey):
+  //  - Several webpack runtimes chain off webpackChunkdiscord_app's push, so
+  //    a pushed chunk's callback fires once per runtime; only one of them
+  //    holds the app's module cache.
+  //  - The PreloadedUserSettings action creator is an object with ProtoClass,
+  //    updateAsync(field, mutator, delaySeconds) and getCurrentValue(). Its
+  //    guildFolders.folders is the whole sidebar in order:
+  //      [{ guildIds: string[], id?: {value}, name?: {value}, color?: {value} }]
+  //    where a loose server is a single-guild entry with no id, and id/color
+  //    values are decimal strings. updateAsync is what Discord's own drag and
+  //    drop uses, so it syncs the change the same way.
+  //  - SortedGuildStore.getGuildFolders() mirrors it as
+  //      [{ folderId?: number, folderName?, folderColor?: number, guildIds }]
+  //    and is what we read the current layout from and verify against.
+
+  function getWebpackRequires() {
+    const chunkName = Object.keys(window).find((k) => k.startsWith("webpackChunk"));
+    if (!chunkName) return [];
+    const reqs = [];
+    window[chunkName].push([["dso-" + Math.random()], {}, (r) => { if (!reqs.includes(r)) reqs.push(r); }]);
+    window[chunkName].pop();
+    return reqs;
+  }
+
+  let discordInternals = null;
+
+  function getDiscordInternals() {
+    if (discordInternals) return discordInternals;
+    let settings = null;
+    let sortedGuildStore = null;
+    const isSettings = (v) => {
+      if (!v.ProtoClass || typeof v.updateAsync !== "function" || typeof v.getCurrentValue !== "function") return false;
+      const cur = v.getCurrentValue();
+      return !!(cur && cur.guildFolders && Array.isArray(cur.guildFolders.folders));
+    };
+    const isSortedGuildStore = (v) =>
+      typeof v.getGuildFolders === "function" && typeof v.getName === "function" && v.getName() === "SortedGuildStore";
+
+    for (const wreq of getWebpackRequires()) {
+      for (const mod of Object.values(wreq.c || {})) {
+        const exp = mod && mod.exports;
+        if (!exp || typeof exp !== "object") continue;
+        let keys;
+        try { keys = Object.keys(exp); } catch (e) { continue; }
+        for (const key of keys) {
+          let v;
+          try { v = exp[key]; } catch (e) { continue; }
+          if (!v || typeof v !== "object") continue;
+          try {
+            if (!settings && isSettings(v)) settings = v;
+            if (!sortedGuildStore && isSortedGuildStore(v)) sortedGuildStore = v;
+          } catch (e) { /* some exports throw on access; skip them */ }
+        }
+        if (settings && sortedGuildStore) break;
+      }
+      if (settings && sortedGuildStore) break;
+    }
+    if (!settings) throw new Error("couldn't find Discord's folder settings (the client may have changed)");
+    if (!sortedGuildStore) throw new Error("couldn't find SortedGuildStore (the client may have changed)");
+
+    discordInternals = {
+      getFolders: () => sortedGuildStore.getGuildFolders(),
+      getRawFolders: () => settings.getCurrentValue().guildFolders.folders,
+      // delaySeconds 0 = send right away, like a deliberate user action.
+      updateFolders: (folders) =>
+        settings.updateAsync("guildFolders", (draft) => { draft.folders = folders; }, 0),
+    };
+    return discordInternals;
+  }
+
+  function intToHex(n) {
+    return n == null ? null : "#" + Number(n).toString(16).padStart(6, "0");
+  }
+
+  function hexToInt(hex) {
+    return hex ? parseInt(hex.replace("#", ""), 16) : null;
+  }
+
+  // Common shape for comparing layouts: [{ id, name, color, guildIds }],
+  // with id null for a loose server.
+  function normalizeStoreFolders(folders) {
+    return folders.map((f) => ({
+      id: f.folderId != null ? String(f.folderId) : null,
+      name: f.folderName || null,
+      color: f.folderColor != null ? Number(f.folderColor) : null,
+      guildIds: f.guildIds.slice(),
+    }));
+  }
+
+  function normalizeProtoFolders(folders) {
+    return folders.map((f) => ({
+      id: f.id ? String(f.id.value) : null,
+      name: f.name ? f.name.value || null : null,
+      color: f.color ? Number(f.color.value) : null,
+      guildIds: f.guildIds.slice(),
+    }));
+  }
+
+  // Store layout -> the editor's item format (also the export format), so a
+  // backup can be re-imported. guildInfo: Map id -> { name, icon }.
+  function storeFoldersToItems(folders, guildInfo) {
+    const guild = (id) => ({ id, name: (guildInfo.get(id) || {}).name || null, icon: (guildInfo.get(id) || {}).icon || null });
+    return normalizeStoreFolders(folders).map((f) =>
+      f.id == null && f.guildIds.length === 1
+        ? Object.assign({ type: "guild" }, guild(f.guildIds[0]))
+        : { type: "folder", id: f.id, name: f.name, color: intToHex(f.color), guilds: f.guildIds.map(guild) }
+    );
+  }
+
+  // Editor items -> guildFolders.folders entries. Servers you're no longer in
+  // are skipped; servers Discord knows about that the layout lacks go at the
+  // top, which is where Discord itself puts unlisted servers.
+  function layoutToFolders(items, knownGuildIds, { toLong, newFolderId }) {
+    const known = new Set(knownGuildIds);
+    const placed = new Set();
+    const unknown = [];
+    const take = (g) => {
+      if (!known.has(g.id)) { unknown.push(g); return false; }
+      if (placed.has(g.id)) return false;
+      placed.add(g.id);
+      return true;
+    };
+    const folders = [];
+    for (const item of items) {
+      if (item.type === "guild") {
+        if (take(item)) folders.push({ guildIds: [item.id] });
+        continue;
+      }
+      const guildIds = item.guilds.filter(take).map((g) => g.id);
+      if (!guildIds.length) continue;
+      const entry = { guildIds, id: { value: toLong(item.id || newFolderId()) } };
+      if (item.name) entry.name = { value: item.name };
+      const color = hexToInt(item.color);
+      if (color != null) entry.color = { value: toLong(color) };
+      folders.push(entry);
+    }
+    const missing = knownGuildIds.filter((id) => !placed.has(id));
+    return { folders: missing.map((id) => ({ guildIds: [id] })).concat(folders), unknown, missing };
+  }
+
+  // Match whatever numeric representation Discord's proto uses for ids.
+  function makeToLong(rawFolders) {
+    const sample = rawFolders.find((f) => f.id && f.id.value != null);
+    const type = sample ? typeof sample.id.value : "string";
+    if (type === "bigint") return (n) => BigInt(n);
+    if (type === "number") return (n) => Number(n);
+    return (n) => String(n);
+  }
+
+  function makeFolderIdGenerator(existingFolders) {
+    const used = new Set(existingFolders.filter((f) => f.folderId != null).map((f) => String(f.folderId)));
+    return () => {
+      let id;
+      do id = String(Math.floor(Math.random() * 2 ** 31) + 1); while (used.has(id));
+      used.add(id);
+      return id;
+    };
+  }
+
+  // Human-readable list of what applying `after` over `before` changes
+  // (both normalized). Empty when they're identical.
+  function summarizeChanges(before, after, guildName) {
+    const lines = [];
+    const folderLabel = (f) => (f ? f.name || "Unnamed folder" : "(no folder)");
+    const foldersById = (list) => new Map(list.filter((f) => f.id != null).map((f) => [f.id, f]));
+    const b = foldersById(before);
+    const a = foldersById(after);
+
+    for (const [id, f] of a) {
+      if (!b.has(id)) lines.push(`New folder "${folderLabel(f)}" (${f.guildIds.length} servers)`);
+    }
+    for (const [id, f] of b) {
+      if (!a.has(id)) lines.push(`Remove folder "${folderLabel(f)}"`);
+    }
+    for (const [id, f] of a) {
+      const old = b.get(id);
+      if (!old) continue;
+      if (old.name !== f.name) lines.push(`Rename folder "${folderLabel(old)}" → "${folderLabel(f)}"`);
+      if (old.color !== f.color) lines.push(`Recolor folder "${folderLabel(f)}" ${intToHex(old.color) || "(none)"} → ${intToHex(f.color) || "(none)"}`);
+    }
+
+    const containerOf = (list) => {
+      const m = new Map();
+      for (const f of list) for (const g of f.guildIds) m.set(g, f.id != null ? f : null);
+      return m;
+    };
+    const cb = containerOf(before);
+    const ca = containerOf(after);
+    const moves = [];
+    for (const [g, f] of ca) {
+      const old = cb.get(g);
+      if ((old ? old.id : null) !== (f ? f.id : null)) {
+        moves.push(`${guildName(g)}: ${folderLabel(old)} → ${folderLabel(f)}`);
+      }
+    }
+    const MAX_MOVES = 25;
+    moves.slice(0, MAX_MOVES).forEach((m) => lines.push("Move " + m));
+    if (moves.length > MAX_MOVES) lines.push(`…and ${moves.length - MAX_MOVES} more server moves`);
+
+    const order = (list) => JSON.stringify(list.map((f) => [f.id, f.guildIds]));
+    // Moves already imply reordering; only call it out when it's all there is.
+    if (!moves.length && order(before) !== order(after)) lines.push("Reorder servers/folders");
+    return lines;
   }
 
   // ---- editor overlay ---------------------------------------------------
@@ -217,7 +439,7 @@
       font-size: 14px; line-height: 1.5; color: #e6e8ec;
     }
     .panel {
-      width: min(760px, 92vw);
+      width: min(980px, 96vw);
       height: min(80vh, 760px);
       background: #14161a;
       border: 1px solid #323844;
@@ -244,6 +466,8 @@
     button:disabled:hover { background: transparent; }
     .btn-accent { border-color: #c98a3e; color: #c98a3e; }
     .btn-accent:hover { background: rgba(201, 138, 62, 0.18); }
+    .btn-primary { background: #c98a3e; border-color: #c98a3e; color: #14161a; }
+    .btn-primary:hover { background: #d99a4e; }
     input[type="file"] { display: none; }
     #empty { border: 1px dashed #323844; border-radius: 3px; padding: 40px 20px; text-align: center; color: #8b92a1; }
 
@@ -327,14 +551,36 @@
     }
     .tile:hover .remove-badge, .tile:focus-within .remove-badge { opacity: 1; }
     .remove-badge:hover { background: #c45b4f; border-color: #c45b4f; }
+
+    .shift-badge {
+      position: absolute; top: -4px; left: 10px; width: 18px; height: 18px; border-radius: 50%;
+      background: #c98a3e; color: #14161a; font-size: 11px; font-weight: 700; line-height: 1;
+      display: flex; align-items: center; justify-content: center; pointer-events: none;
+    }
+    .shift-tip {
+      position: fixed; display: none; z-index: 100000; pointer-events: none;
+      background: #c98a3e; color: #14161a; font-size: 12px; font-weight: 600;
+      padding: 3px 8px; border-radius: 4px; white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    .shift-tip.muted { background: #1c1f26; color: #8b92a1; border: 1px solid #323844; }
     @media (prefers-reduced-motion: no-preference) { .remove-badge { transition: opacity 0.1s, background 0.1s; } }
   `;
+
+  // Editor-only identity for folders that survives undo/redo snapshots
+  // (which rebuild every object) and covers new folders that have no id yet.
+  // Never exported.
+  let folderKeySeq = 0;
+  function nextFolderKey() {
+    return "f" + ++folderKeySeq;
+  }
 
   function cloneItemsForEditing(items) {
     return items.map((item) =>
       item.type === "folder"
         ? {
             type: "folder",
+            key: item.key || nextFolderKey(),
             id: item.id ?? null,
             name: item.name || "",
             color: item.color || null,
@@ -384,9 +630,11 @@
               <button id="new-folder-btn">+ New folder</button>
               <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" disabled>↶ Undo</button>
               <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷ Redo</button>
+              <button id="refresh-btn" title="Reload the current layout from Discord (undoable)">⟳ Refresh</button>
               <label class="btn" id="import-label" for="file-input">Import JSON</label>
               <input id="file-input" type="file" accept="application/json" />
               <button id="export-btn" class="btn-accent">Export JSON</button>
+              <button id="apply-btn" class="btn-primary">Apply to Discord</button>
               <button id="close-btn">Close</button>
             </div>
             <p class="hint" id="hint"></p>
@@ -397,6 +645,7 @@
             <div id="board"></div>
           </main>
           <div id="status"></div>
+          <div id="shift-tip" class="shift-tip"></div>
         </div>
       </div>
     `;
@@ -407,13 +656,16 @@
     const hintEl = root.getElementById("hint");
     const fileInput = root.getElementById("file-input");
     const importLabel = root.getElementById("import-label");
+    const refreshBtn = root.getElementById("refresh-btn");
     const exportBtn = root.getElementById("export-btn");
+    const applyBtn = root.getElementById("apply-btn");
     const newFolderBtn = root.getElementById("new-folder-btn");
     const undoBtn = root.getElementById("undo-btn");
     const redoBtn = root.getElementById("redo-btn");
     const closeBtn = root.getElementById("close-btn");
     const folderToolbarEl = root.getElementById("folder-toolbar");
     const backdrop = root.querySelector(".backdrop");
+    const shiftTipEl = root.getElementById("shift-tip");
 
     function setStatus(msg, isError) {
       statusEl.textContent = msg || "";
@@ -422,6 +674,9 @@
 
     function close() {
       document.removeEventListener("keydown", onKeydown);
+      window.removeEventListener("keydown", onShiftKey, true);
+      window.removeEventListener("keyup", onShiftKey, true);
+      window.removeEventListener("blur", onWindowBlur);
       host.remove();
     }
 
@@ -429,12 +684,25 @@
       if (e.key === "Escape") { close(); return; }
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+      // Leave Ctrl+Z/Y to the text field's own undo while typing in one.
+      const target = e.composedPath()[0];
+      if (target && target.tagName === "INPUT") return;
       const key = e.key.toLowerCase();
       if (key === "z" && e.shiftKey) { e.preventDefault(); redo(); }
       else if (key === "z") { e.preventDefault(); undo(); }
       else if (key === "y") { e.preventDefault(); redo(); }
     }
     document.addEventListener("keydown", onKeydown);
+    // Discord moves focus to the message box when you type while no text
+    // field is focused, and from outside the shadow root the focused element
+    // looks like our host div, not the input inside it. So keep key events
+    // from leaving the editor (handling our own shortcuts here instead).
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      host.addEventListener(type, (e) => {
+        if (type === "keydown") onKeydown(e);
+        e.stopPropagation();
+      });
+    }
     closeBtn.addEventListener("click", close);
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) close();
@@ -501,6 +769,91 @@
       render();
     }
 
+    // ---- shift-click destination ----
+    //
+    // The folder you last added a server to (or picked with "Set as
+    // shift-click destination"); shift-clicking any server sends it there.
+    // Tracked by folder key (with id as a fallback after import/refresh).
+
+    let shiftDest = null; // { key, id }
+
+    function setShiftDest(folder) {
+      shiftDest = folder ? { key: folder.key, id: folder.id } : null;
+    }
+
+    function getShiftDest() {
+      if (!shiftDest) return null;
+      const folders = state.items.filter((i) => i.type === "folder");
+      return (
+        folders.find((f) => f.key === shiftDest.key) ||
+        (shiftDest.id != null ? folders.find((f) => f.id === shiftDest.id) : null) ||
+        null
+      );
+    }
+
+    function folderDisplayName(folder) {
+      return folder.name || "Unnamed folder";
+    }
+
+    function shiftSendGuild(guild, origin) {
+      const dest = getShiftDest();
+      if (!dest) {
+        setStatus("No shift-click folder yet: add a server to a folder, or open one and click “Set as shift-click destination”.", true);
+        return;
+      }
+      if (origin.type === "folder" && origin.folderRef === dest) return;
+      withUndo(() => {
+        removeGuild({ guildRef: guild, origin });
+        dest.guilds.push({ id: guild.id, name: guild.name, icon: guild.icon });
+      });
+      setStatus(`Added ${guild.name || "server"} to ${folderDisplayName(dest)}.`);
+    }
+
+    // Tooltip that follows the cursor while Shift is held over a server.
+    let shiftHeld = false;
+    let hoverGuild = null; // { guild, origin }
+    let mouseX = 0;
+    let mouseY = 0;
+
+    function updateShiftTip() {
+      if (!shiftHeld || !hoverGuild) {
+        shiftTipEl.style.display = "none";
+        return;
+      }
+      const dest = getShiftDest();
+      const inDest = dest && hoverGuild.origin.type === "folder" && hoverGuild.origin.folderRef === dest;
+      shiftTipEl.textContent = !dest
+        ? "No shift-click folder set"
+        : inDest
+          ? `Already in ${folderDisplayName(dest)}`
+          : `Add to ${folderDisplayName(dest)}`;
+      shiftTipEl.classList.toggle("muted", !dest || inDest);
+      shiftTipEl.style.left = mouseX + 14 + "px";
+      shiftTipEl.style.top = mouseY + 16 + "px";
+      shiftTipEl.style.display = "block";
+    }
+
+    // Capture phase on window sees keys even while focus is inside the
+    // shadow root (the host stops them from bubbling further).
+    function onShiftKey(e) {
+      if (e.key !== "Shift") return;
+      shiftHeld = e.type === "keydown";
+      updateShiftTip();
+    }
+    function onWindowBlur() {
+      shiftHeld = false;
+      updateShiftTip();
+    }
+    window.addEventListener("keydown", onShiftKey, true);
+    window.addEventListener("keyup", onShiftKey, true);
+    window.addEventListener("blur", onWindowBlur);
+    backdrop.addEventListener("mousemove", (e) => {
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+      shiftHeld = e.shiftKey;
+      updateShiftTip();
+    });
+
     // ---- data helpers ----
 
     function removeGuild(payload) {
@@ -548,6 +901,7 @@
       removeGuild(dragPayload);
       const folder = {
         type: "folder",
+        key: nextFolderKey(),
         id: null,
         name: "",
         color: null,
@@ -559,12 +913,14 @@
       const newIdx = state.items.indexOf(target);
       state.items.splice(newIdx === -1 ? idx : newIdx, 1, folder);
       viewFolder = folder;
+      setShiftDest(folder);
     }
 
     function addGuildToFolder(folder, payload) {
       const g = payload.guildRef;
       removeGuild(payload);
       folder.guilds.push({ id: g.id, name: g.name, icon: g.icon });
+      setShiftDest(folder);
     }
 
     // Folder A dropped onto folder B: B keeps its name/color and gains A's
@@ -575,6 +931,7 @@
       if (idx === -1) return false;
       target.guilds.push(...source.guilds.map((g) => ({ id: g.id, name: g.name, icon: g.icon })));
       state.items.splice(idx, 1);
+      setShiftDest(target);
     }
 
     function reorderInFolder(folder, payload, target, pos) {
@@ -608,7 +965,7 @@
     }
 
     function newFolder() {
-      state.items.push({ type: "folder", id: null, name: "", color: null, guilds: [] });
+      state.items.push({ type: "folder", key: nextFolderKey(), id: null, name: "", color: null, guilds: [] });
     }
 
     // ---- shared tile building ----
@@ -687,6 +1044,21 @@
       tile.addEventListener("dragend", () => {
         tile.classList.remove("dragging");
         dragPayload = null;
+      });
+      tile.addEventListener("mouseenter", () => {
+        hoverGuild = { guild, origin };
+        updateShiftTip();
+      });
+      tile.addEventListener("mouseleave", () => {
+        hoverGuild = null;
+        updateShiftTip();
+      });
+      tile.addEventListener("click", (e) => {
+        if (!e.shiftKey) return;
+        e.preventDefault();
+        hoverGuild = null; // this tile is about to be re-rendered away
+        shiftSendGuild(guild, origin);
+        updateShiftTip();
       });
 
       return tile;
@@ -770,6 +1142,14 @@
       });
       tile.appendChild(unfoldBadge);
 
+      if (folder === getShiftDest()) {
+        const destBadge = document.createElement("div");
+        destBadge.className = "shift-badge";
+        destBadge.textContent = "⇧";
+        destBadge.title = "Shift-click destination";
+        tile.appendChild(destBadge);
+      }
+
       tile.addEventListener("click", () => {
         viewFolder = folder;
         render();
@@ -791,7 +1171,7 @@
       importLabel.style.display = "";
       newFolderBtn.style.display = "";
       hintEl.textContent =
-        "Drag an icon to reorder. Drop it on the middle of another icon to bundle them into a folder, or onto a folder to add it (drop a folder on a folder to merge them). Click a folder to open it, or its × to unfold it.";
+        "Drag an icon to reorder. Drop it on the middle of another icon to bundle them into a folder, or onto a folder to add it (drop a folder on a folder to merge them). Click a folder to open it, or its × to unfold it. Shift-click a server to send it to the ⇧ folder.";
 
       boardEl.innerHTML = "";
 
@@ -852,7 +1232,7 @@
     function renderFolderView(folder) {
       importLabel.style.display = "none";
       newFolderBtn.style.display = "none";
-      hintEl.textContent = "Drag to reorder within this folder, or use the × to move a server back out.";
+      hintEl.textContent = "Drag to reorder within this folder, or use the × to move a server back out. Shift-click a server to send it to the ⇧ folder.";
 
       folderToolbarEl.style.display = "flex";
       folderToolbarEl.innerHTML = "";
@@ -886,7 +1266,17 @@
       delBtn.textContent = "Delete folder";
       delBtn.addEventListener("click", () => withUndo(() => deleteFolderAction(folder)));
 
-      folderToolbarEl.append(backBtn, colorInput, nameInput, delBtn);
+      const isDest = folder === getShiftDest();
+      const destBtn = document.createElement("button");
+      destBtn.textContent = isDest ? "⇧ Shift-click destination ✓" : "⇧ Set as shift-click destination";
+      destBtn.title = "Shift-click a server anywhere to send it to this folder";
+      destBtn.disabled = isDest;
+      destBtn.addEventListener("click", () => {
+        setShiftDest(folder);
+        render();
+      });
+
+      folderToolbarEl.append(backBtn, colorInput, nameInput, destBtn, delBtn);
       if (!folder.name) nameInput.focus();
 
       boardEl.innerHTML = "";
@@ -966,13 +1356,155 @@
 
     newFolderBtn.addEventListener("click", () => withUndo(newFolder));
 
+    refreshBtn.addEventListener("click", async () => {
+      refreshBtn.disabled = true;
+      setStatus("Reloading from Discord…");
+      try {
+        const items = await loadLiveLayout();
+        withUndo(() => {
+          state.items = cloneItemsForEditing(items);
+          viewFolder = null;
+        });
+        setStatus(`Reloaded ${items.length} top-level item(s) from Discord. Undo brings back your previous edits.`);
+      } catch (e) {
+        console.error("[discord-server-organizer]", e);
+        setStatus("Refresh failed: " + e.message, true);
+      } finally {
+        refreshBtn.disabled = false;
+      }
+    });
+
     exportBtn.addEventListener("click", () => {
       const out = { exportedAt: new Date().toISOString(), items: serializeItemsForExport(state.items) };
       const filename = downloadJSON(out, "discord-folders-edited");
       setStatus(`Exported "${filename}".`);
     });
 
+    // ---- apply to Discord ----
+
+    // Names/icons for any guild we've seen this session (scrape or import),
+    // so backups and the change summary can show names, not just ids.
+    function guildInfoMap() {
+      const info = new Map();
+      const add = (g) => { if (g.id && !info.has(g.id)) info.set(g.id, { name: g.name, icon: g.icon }); };
+      for (const list of [state.items, initialItems]) {
+        for (const item of list) {
+          if (item.type === "folder") item.guilds.forEach(add);
+          else add(item);
+        }
+      }
+      return info;
+    }
+
+    function sameLayout(a, b) {
+      return JSON.stringify(a) === JSON.stringify(b);
+    }
+
+    async function verifyApplied(internals, intended) {
+      const deadline = Date.now() + 3000;
+      let actual;
+      while (Date.now() < deadline) {
+        actual = normalizeStoreFolders(internals.getFolders());
+        if (sameLayout(actual, intended)) return true;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      console.warn("[dso-apply] verify: Discord's layout doesn't match what was applied", { intended, actual });
+      return false;
+    }
+
+    applyBtn.addEventListener("click", async () => {
+      let internals;
+      try {
+        internals = getDiscordInternals();
+      } catch (e) {
+        console.error("[dso-apply]", e);
+        setStatus("Can't apply: " + e.message, true);
+        return;
+      }
+
+      const current = internals.getFolders();
+      const knownIds = current.flatMap((f) => f.guildIds);
+      const plan = layoutToFolders(state.items, knownIds, {
+        toLong: makeToLong(internals.getRawFolders()),
+        newFolderId: makeFolderIdGenerator(current),
+      });
+      const before = normalizeStoreFolders(current);
+      const after = normalizeProtoFolders(plan.folders);
+      const info = guildInfoMap();
+      const guildName = (id) => (info.get(id) || {}).name || id;
+
+      const changes = summarizeChanges(before, after, guildName);
+      if (!changes.length) {
+        setStatus("Nothing to apply: Discord already has this layout.");
+        return;
+      }
+      const notes = [];
+      if (plan.unknown.length) {
+        notes.push(`Skipping ${plan.unknown.length} server(s) you're no longer in: ` +
+          plan.unknown.map((g) => g.name || g.id).join(", "));
+      }
+      if (plan.missing.length) {
+        notes.push(`${plan.missing.length} server(s) not in this layout will go at the top: ` +
+          plan.missing.map(guildName).join(", "));
+      }
+      const msg =
+        "Apply this layout to Discord? This changes your real server list (synced to all your devices).\n\n" +
+        changes.map((l) => "  • " + l).join("\n") +
+        (notes.length ? "\n\n" + notes.join("\n\n") : "") +
+        "\n\nA backup of your current layout will be downloaded first.";
+      if (!confirm(msg)) return;
+
+      applyBtn.disabled = true;
+      try {
+        const backup = {
+          exportedAt: new Date().toISOString(),
+          note: "Discord layout before Apply; Import + Apply this to restore",
+          items: storeFoldersToItems(current, info),
+        };
+        const backupName = downloadJSON(backup, "discord-folders-backup");
+        console.log("[dso-apply] applying", { changes, folders: plan.folders });
+        await internals.updateFolders(plan.folders);
+        const ok = await verifyApplied(internals, after);
+        setStatus(
+          ok
+            ? `Applied to Discord (${changes.length} change(s)). Backup saved as "${backupName}".`
+            : `Applied, but Discord's layout doesn't match what was sent; see console. Backup saved as "${backupName}".`,
+          !ok
+        );
+      } catch (e) {
+        console.error("[dso-apply]", e);
+        setStatus("Apply failed: " + e.message, true);
+      } finally {
+        applyBtn.disabled = false;
+      }
+    });
+
     render();
+  }
+
+  // Scrapes the sidebar (expanding all folders), then fills in folder names
+  // and colors from Discord's store: the markup doesn't carry colors, and its
+  // folder names are inferred from accessibility labels (and without real
+  // colors, Apply would wipe them).
+  async function loadLiveLayout() {
+    const { items } = await buildExport();
+    try {
+      const byId = new Map(
+        normalizeStoreFolders(getDiscordInternals().getFolders())
+          .filter((f) => f.id != null)
+          .map((f) => [f.id, f])
+      );
+      for (const item of items) {
+        const f = item.type === "folder" && byId.get(String(item.id));
+        if (f) {
+          item.name = f.name;
+          item.color = intToHex(f.color);
+        }
+      }
+    } catch (e) {
+      console.warn("[discord-server-organizer] couldn't read folder names/colors from Discord", e);
+    }
+    return items;
   }
 
   async function onOrganizeClick(btn) {
@@ -980,8 +1512,7 @@
     btn.disabled = true;
     btn.textContent = "Loading...";
     try {
-      const data = await buildExport();
-      openEditor(data.items);
+      openEditor(await loadLiveLayout());
     } catch (e) {
       console.error("[discord-server-organizer]", e);
       alert(`Discord Server Organizer failed to load: ${e.message}\nSee console for details.`);
@@ -991,16 +1522,24 @@
     }
   }
 
-  // ---- button --------------------------------------------------------------
+  // ---- buttons -------------------------------------------------------------
 
-  function createButton() {
+  async function onCollapseClick(btn) {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Collapsing...";
+    try {
+      await collapseAllFolders();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+
+  function makePageButton(text, title, onClick) {
     const btn = document.createElement("button");
-    btn.textContent = "Organize Servers";
-    btn.title = "Open the server/folder regrouping editor";
-    btn.style.position = "fixed";
-    btn.style.left = "8px";
-    btn.style.bottom = "8px";
-    btn.style.zIndex = "9999";
+    btn.textContent = text;
+    btn.title = title;
     btn.style.font = "11px sans-serif";
     btn.style.padding = "4px 8px";
     btn.style.border = "1px solid #000";
@@ -1008,13 +1547,28 @@
     btn.style.background = "#5865f2";
     btn.style.color = "#fff";
     btn.style.cursor = "pointer";
-    btn.addEventListener("click", () => onOrganizeClick(btn));
-    document.body.appendChild(btn);
+    btn.addEventListener("click", () => onClick(btn));
+    return btn;
+  }
+
+  function createButtons() {
+    const bar = document.createElement("div");
+    bar.style.position = "fixed";
+    bar.style.left = "8px";
+    bar.style.bottom = "8px";
+    bar.style.zIndex = "9999";
+    bar.style.display = "flex";
+    bar.style.gap = "6px";
+    bar.append(
+      makePageButton("Organize Servers", "Open the server/folder regrouping editor", onOrganizeClick),
+      makePageButton("Collapse folders", "Collapse every open folder in the server list", onCollapseClick)
+    );
+    document.body.appendChild(bar);
   }
 
   function init() {
-    if (document.body) createButton();
-    else document.addEventListener("DOMContentLoaded", createButton);
+    if (document.body) createButtons();
+    else document.addEventListener("DOMContentLoaded", createButtons);
   }
 
   init();
