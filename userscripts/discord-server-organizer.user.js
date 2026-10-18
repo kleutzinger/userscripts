@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js
 // @grant       none
-// @version     2.6
+// @version     2.8
 // @author      github.com/kleutzinger/
 // @description Tools for managing your Discord server list. "Organize Servers" opens an in-page icon-grid editor (real server icons, folders you can open, full undo/redo) to drag/regroup/reorder servers and folders and export the edited layout. More to come (bulk muting, applying the edited layout back to Discord).
 // ==/UserScript==
@@ -322,11 +322,12 @@
 
     .remove-badge {
       position: absolute; top: -4px; right: 10px; width: 18px; height: 18px; border-radius: 50%;
-      background: #c45b4f; color: #fff; border: none; font-size: 10px; line-height: 1; padding: 0;
+      background: #000; color: #fff; border: 1px solid #4a5060; font-size: 10px; line-height: 1; padding: 0;
       display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0;
     }
     .tile:hover .remove-badge, .tile:focus-within .remove-badge { opacity: 1; }
-    @media (prefers-reduced-motion: no-preference) { .remove-badge { transition: opacity 0.1s; } }
+    .remove-badge:hover { background: #c45b4f; border-color: #c45b4f; }
+    @media (prefers-reduced-motion: no-preference) { .remove-badge { transition: opacity 0.1s, background 0.1s; } }
   `;
 
   function cloneItemsForEditing(items) {
@@ -380,11 +381,11 @@
           <header>
             <div class="header-row">
               <h1>Discord Server Organizer</h1>
-              <label class="btn" id="import-label" for="file-input">Import JSON</label>
-              <input id="file-input" type="file" accept="application/json" />
               <button id="new-folder-btn">+ New folder</button>
               <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" disabled>↶ Undo</button>
               <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷ Redo</button>
+              <label class="btn" id="import-label" for="file-input">Import JSON</label>
+              <input id="file-input" type="file" accept="application/json" />
               <button id="export-btn" class="btn-accent">Export JSON</button>
               <button id="close-btn">Close</button>
             </div>
