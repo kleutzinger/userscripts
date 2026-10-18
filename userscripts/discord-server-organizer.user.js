@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js
 // @grant       none
-// @version     2.3
+// @version     2.6
 // @author      github.com/kleutzinger/
 // @description Tools for managing your Discord server list. "Organize Servers" opens an in-page icon-grid editor (real server icons, folders you can open, full undo/redo) to drag/regroup/reorder servers and folders and export the edited layout. More to come (bulk muting, applying the edited layout back to Discord).
 // ==/UserScript==
@@ -25,9 +25,16 @@
     return el.getAttribute("data-list-item-id").match(LIST_ITEM_RE)[1];
   }
 
+  // The hidden accessible label carries live status alongside the name
+  // (seen: "Name, Voice call active"; Discord also prefixes "N mentions, ").
+  // Only strip these exact patterns — real server names can contain commas.
+  const LABEL_PREFIX_RE = /^\d+\s+mentions?,\s*/i;
+  const LABEL_SUFFIX_RE = /,\s*voice call active$/i;
+
   function getName(el) {
     const span = el.querySelector('span[class*="hiddenVisually"]');
-    return span ? span.textContent.trim() : null;
+    if (!span) return null;
+    return span.textContent.trim().replace(LABEL_PREFIX_RE, "").replace(LABEL_SUFFIX_RE, "");
   }
 
   // Best guess, not empirically re-verified this session: Discord renders
@@ -222,7 +229,7 @@
     .header-row { display: flex; align-items: center; gap: 10px; }
     h1 { font-size: 15px; font-weight: 600; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .hint { margin: 8px 0 0; color: #8b92a1; font-size: 12.5px; }
-    main { flex: 1; overflow-y: auto; }
+    main { flex: 1; overflow-y: auto; overflow-x: hidden; }
     #board { padding: 16px 20px; }
     #status { flex-shrink: 0; padding: 0 20px 12px; font-size: 12.5px; color: #8b92a1; min-height: 1.3em; }
     #status.error { color: #c45b4f; }
@@ -289,13 +296,13 @@
       position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
       min-width: 160px; max-width: 220px; max-height: 220px; overflow-y: auto;
       background: #1c1f26; border: 1px solid #323844; border-radius: 6px;
-      padding: 6px; display: flex; flex-direction: column; gap: 4px;
-      opacity: 0; pointer-events: none; z-index: 20;
+      padding: 6px; display: none; flex-direction: column; gap: 4px;
+      pointer-events: none; z-index: 20;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
       text-align: left;
     }
-    .tile:hover .folder-tooltip, .tile:focus-within .folder-tooltip { opacity: 1; }
-    @media (prefers-reduced-motion: no-preference) { .folder-tooltip { transition: opacity 0.1s; } }
+    /* display (not opacity) so hidden tooltips don't widen the scroll area */
+    .tile:hover .folder-tooltip, .tile:focus-within .folder-tooltip { display: flex; }
     .folder-tooltip-row { display: flex; align-items: center; gap: 6px; }
     .avatar-xs { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
     .avatar-fallback.avatar-xs { font-size: 8px; }
@@ -309,6 +316,9 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e8ec;
     }
     .tile-label.unnamed { color: #8b92a1; font-style: italic; }
+    .folder-tile .tile-label { display: flex; }
+    .tile-label-text { overflow: hidden; text-overflow: ellipsis; }
+    .tile-label-count { flex-shrink: 0; margin-left: 0.25em; font-style: normal; }
 
     .remove-badge {
       position: absolute; top: -4px; right: 10px; width: 18px; height: 18px; border-radius: 50%;
@@ -556,6 +566,16 @@
       folder.guilds.push({ id: g.id, name: g.name, icon: g.icon });
     }
 
+    // Folder A dropped onto folder B: B keeps its name/color and gains A's
+    // servers (appended in order); A goes away.
+    function mergeFolders(target, source) {
+      if (target === source) return false;
+      const idx = state.items.indexOf(source);
+      if (idx === -1) return false;
+      target.guilds.push(...source.guilds.map((g) => ({ id: g.id, name: g.name, icon: g.icon })));
+      state.items.splice(idx, 1);
+    }
+
     function reorderInFolder(folder, payload, target, pos) {
       if (payload.guildRef === target) return false;
       const g = payload.guildRef;
@@ -572,11 +592,12 @@
     }
 
     function deleteFolderAction(folder) {
-      if (
-        folder.guilds.length &&
-        !confirm(`Delete "${folder.name || "this folder"}"? Its ${folder.guilds.length} server(s) will become ungrouped.`)
-      ) {
-        return false;
+      if (folder.guilds.length) {
+        const list = folder.guilds.map((g) => "  • " + (g.name || "(unnamed)")).join("\n");
+        const msg =
+          `Unfold "${folder.name || "Unnamed folder"}"? These ${folder.guilds.length} server(s) ` +
+          `will become ungrouped in its place:\n\n${list}`;
+        if (!confirm(msg)) return false;
       }
       const idx = state.items.indexOf(folder);
       if (idx === -1) return false;
@@ -692,9 +713,33 @@
 
       const label = document.createElement("div");
       label.className = "tile-label" + (folder.name ? "" : " unnamed");
-      const countSuffix = folder.guilds.length ? ` (${folder.guilds.length})` : "";
-      label.textContent = (folder.name || "Unnamed folder") + countSuffix;
+      // Name and count in separate spans so a long name ellipsizes but the
+      // count stays visible.
+      const labelText = document.createElement("span");
+      labelText.className = "tile-label-text";
+      labelText.textContent = folder.name || "Unnamed folder";
+      label.appendChild(labelText);
+      if (folder.guilds.length) {
+        const count = document.createElement("span");
+        count.className = "tile-label-count";
+        count.textContent = `(${folder.guilds.length})`;
+        label.appendChild(count);
+      }
       tile.appendChild(label);
+
+      // Keep the hover list inside the scroll area horizontally (it's wider
+      // than the tile, so it would get clipped in the edge columns).
+      tile.addEventListener("mouseenter", () => {
+        const tip = tile.querySelector(".folder-tooltip");
+        if (!tip) return;
+        tip.style.transform = "translateX(-50%)";
+        const main = tile.closest("main");
+        const left = main.getBoundingClientRect().left;
+        const right = left + main.clientWidth; // excludes the scrollbar
+        const r = tip.getBoundingClientRect();
+        const shift = Math.min(0, right - 4 - r.right) || Math.max(0, left + 4 - r.left);
+        if (shift) tip.style.transform = `translateX(calc(-50% + ${shift}px))`;
+      });
 
       if (folder.guilds.length > 0) {
         const tooltip = document.createElement("div");
@@ -711,6 +756,18 @@
         });
         tile.appendChild(tooltip);
       }
+
+      const unfoldBadge = document.createElement("button");
+      unfoldBadge.className = "remove-badge";
+      unfoldBadge.textContent = "✕";
+      unfoldBadge.title = "Unfold (ungroup this folder's servers)";
+      unfoldBadge.setAttribute("aria-label", "Unfold folder");
+      unfoldBadge.draggable = false;
+      unfoldBadge.addEventListener("click", (e) => {
+        e.stopPropagation(); // don't also open the folder
+        withUndo(() => deleteFolderAction(folder));
+      });
+      tile.appendChild(unfoldBadge);
 
       tile.addEventListener("click", () => {
         viewFolder = folder;
@@ -733,7 +790,7 @@
       importLabel.style.display = "";
       newFolderBtn.style.display = "";
       hintEl.textContent =
-        "Drag an icon to reorder. Drop it on the middle of another icon to bundle them into a folder, or onto a folder to add it. Click a folder to open it.";
+        "Drag an icon to reorder. Drop it on the middle of another icon to bundle them into a folder, or onto a folder to add it (drop a folder on a folder to merge them). Click a folder to open it, or its × to unfold it.";
 
       boardEl.innerHTML = "";
 
@@ -751,9 +808,11 @@
         const tile = item.type === "folder" ? makeFolderTile(item) : makeGuildTile(item, { type: "top" });
         attachDropZones(tile, {
           accepts: () => true,
-          hasInto: (p) => p.kind === "guild",
+          hasInto: (p) =>
+            p.kind === "guild" || (item.type === "folder" && p.folderRef !== item),
           into: () => {
             withUndo(() => {
+              if (dragPayload.kind === "folder") return mergeFolders(item, dragPayload.folderRef);
               if (item.type === "folder") return addGuildToFolder(item, dragPayload);
               return mergeIntoNewFolder(item, dragPayload.guildRef);
             });
