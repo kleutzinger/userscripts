@@ -5,7 +5,7 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js
 // @grant       none
-// @version     1.2
+// @version     1.3
 // @author      github.com/kleutzinger/
 // @description Adds a small "Steam" button directly on each game's thumbnail in gg.deals listings (bundle pages, search results, wishlists, etc.) that jumps straight to the Steam store page, without needing to open the gg.deals game page first.
 // @icon https://gg.deals/favicon.ico
@@ -14,10 +14,20 @@
 (function () {
   "use strict";
 
-  const CACHE_KEY = "gg-deals-steam-buttons:cache:v2";
+  const CACHE_KEY = "gg-deals-steam-buttons:cache:v3";
   const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
   const MAX_CONCURRENT_FETCHES = 3;
   const STEAM_APP_RE = /store\.steampowered\.com\/(?:app|agecheck\/app)\/(\d+)/;
+
+  // Thumbnails on cards, plus plain text links inside article prose (news pages).
+  const SELECTOR = [
+    'a.main-image[href*="/game/"]',
+    'a.main-image[href*="/pack/"]',
+    'p a[href*="/game/"]',
+    'p a[href*="/pack/"]',
+    'li a[href*="/game/"]',
+    'li a[href*="/pack/"]',
+  ].join(",");
 
   const cache = loadCache();
   const seen = new WeakSet();
@@ -52,8 +62,8 @@
   }
 
   function slugFromHref(href) {
-    const m = href.match(/\/game\/([^/]+)\/?/);
-    return m ? m[1] : null;
+    const m = href.match(/\/(game|pack)\/([^/?#]+)/);
+    return m ? `${m[1]}/${m[2]}` : null;
   }
 
   async function fetchSteamUrl(gameHref) {
@@ -64,7 +74,35 @@
     return m ? `https://store.steampowered.com/app/${m[1]}/` : null;
   }
 
+  // Inline text links (e.g. in news articles) get a small button right after
+  // the link instead of an overlay on a thumbnail.
+  function addInlineButton(anchorEl, steamUrl) {
+    if (anchorEl.nextElementSibling?.classList.contains("gg-steam-btn")) return;
+    const btn = document.createElement("span");
+    btn.className = "gg-steam-btn";
+    btn.title = "Open on Steam";
+    btn.textContent = "Steam";
+    btn.dataset.steamUrl = steamUrl;
+    Object.assign(btn.style, {
+      display: "inline-block",
+      margin: "0 4px",
+      background: "rgba(23,26,33,.85)",
+      color: "#66c0f4",
+      font: "700 10px/1.6 Arial, sans-serif",
+      padding: "0 5px",
+      borderRadius: "3px",
+      border: "1px solid #66c0f4",
+      cursor: "pointer",
+      verticalAlign: "middle",
+    });
+    anchorEl.after(btn);
+  }
+
   function addButton(anchorEl, steamUrl) {
+    if (anchorEl.matches("a:not(.main-image)")) {
+      addInlineButton(anchorEl, steamUrl);
+      return;
+    }
     if (anchorEl.querySelector(".gg-steam-btn")) return;
     if (getComputedStyle(anchorEl).position === "static") {
       anchorEl.style.position = "relative";
@@ -155,7 +193,7 @@
   );
 
   function scan() {
-    document.querySelectorAll('a.main-image[href*="/game/"]').forEach((el) => {
+    document.querySelectorAll(SELECTOR).forEach((el) => {
       if (seen.has(el)) return;
       seen.add(el);
       io.observe(el);
