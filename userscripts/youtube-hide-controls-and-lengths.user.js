@@ -8,7 +8,7 @@
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/youtube-hide-controls-and-lengths.user.js
 // @run-at      document-start
 // @grant       none
-// @version     1.0
+// @version     1.1
 // @author      github.com/kleutzinger/
 // @description Hides the YouTube player controls and all video lengths (thumbnail badges, time display). Toggle it on/off from your userscript manager.
 // @icon https://www.youtube.com/favicon.ico
@@ -39,6 +39,22 @@
     .thumbnail-overlay-badge-shape,
     ytm-thumbnail-overlay-time-status-renderer,
     .video-thumbnail-overlay-badge-shape { display: none !important; }
+
+    /* small badge after the watch-page title so you know things are hidden */
+    ytd-watch-metadata h1.ytd-watch-metadata::after {
+      content: "time hidden";
+      display: inline-block;
+      margin-left: 10px;
+      padding: 1px 8px;
+      border-radius: 10px;
+      background: rgba(128, 128, 128, 0.25);
+      color: var(--yt-spec-text-secondary, #aaa);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 18px;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
   `;
 
   const style = document.createElement("style");
