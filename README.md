@@ -43,3 +43,7 @@ Adds a small "Steam" button on each game's thumbnail in lists on https://gg.deal
 ## Discord Server Organizer [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/discord-server-organizer.user.js)
 
 Tools for managing your Discord server list on the web client (https://discord.com/channels/\*). "Organize Servers" opens an in-page icon-grid editor — like a phone home screen — with your real server icons: drag an icon to reorder it, drop it on another icon to bundle both into a new folder, drop it on a folder to add it there, or click a folder to open it and manage its contents. Export the edited layout as JSON when you're done. It's editor-only for now — applying the result back to real Discord isn't implemented yet. More to come (bulk muting, applying the edit back to Discord).
+
+## YouTube Hide Controls and Video Lengths [(install)](https://github.com/kleutzinger/userscripts/raw/main/userscripts/youtube-hide-controls-and-lengths.user.js)
+
+Hides the YouTube player controls (top title bar and bottom control bar) and all video lengths (thumbnail duration badges and the player time display). There is no built-in toggle: turn the script on or off in your userscript manager and refresh the page.
