@@ -6,7 +6,7 @@
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js
 // @grant       none
-// @version     1.4
+// @version     1.5
 // @author      github.com/kleutzinger/
 // @description Adds a small "Steam" button directly on each game's thumbnail in gg.deals listings (bundle pages, search results, wishlists, etc.) that jumps straight to the Steam store page, without needing to open the gg.deals game page first.
 // @icon https://gg.deals/favicon.ico
@@ -15,9 +15,11 @@
 (function () {
   "use strict";
 
-  const CACHE_KEY = "gg-deals-steam-buttons:cache:v3";
+  const CACHE_KEY = "gg-deals-steam-buttons:cache:v4";
   const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-  const MAX_CONCURRENT_FETCHES = 3;
+  const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000; // "no Steam link" results expire sooner
+  const MAX_CONCURRENT_FETCHES = 2;
+  const MAX_ATTEMPTS = 4;
   const STEAM_APP_RE = /store\.steampowered\.com\/(?:app|agecheck\/app)\/(\d+)/;
 
   // Thumbnails on cards, plus plain text links inside article prose (news pages).
@@ -28,6 +30,7 @@
     'p a[href*="/pack/"]',
     'li a[href*="/game/"]',
     'li a[href*="/pack/"]',
+    'a.main-image[href*="/dlc/"]',
   ].join(",");
 
   const cache = loadCache();
@@ -53,7 +56,9 @@
 
   function getCached(slug) {
     const entry = cache[slug];
-    if (!entry || Date.now() - entry.t > CACHE_TTL_MS) return undefined;
+    if (!entry) return undefined;
+    const ttl = entry.url ? CACHE_TTL_MS : NEGATIVE_TTL_MS;
+    if (Date.now() - entry.t > ttl) return undefined;
     return entry.url; // null means "checked, no Steam link found"
   }
 
@@ -63,13 +68,16 @@
   }
 
   function slugFromHref(href) {
-    const m = href.match(/\/(game|pack)\/([^/?#]+)/);
+    const m = href.match(/\/(game|pack|dlc)\/([^/?#]+)/);
     return m ? `${m[1]}/${m[2]}` : null;
   }
 
   async function fetchSteamUrl(gameHref) {
     const res = await fetch(gameHref, { credentials: "same-origin" });
-    if (!res.ok) return null;
+    // Only a real 404/410 means "no such page". Anything else (429, 403
+    // challenge, 5xx) is transient: throw so it is retried, never cached.
+    if (res.status === 404 || res.status === 410) return null;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
     const m = html.match(STEAM_APP_RE);
     return m ? `https://store.steampowered.com/app/${m[1]}/` : null;
@@ -158,7 +166,14 @@
           if (url) addButton(job.anchorEl, url);
         })
         .catch(() => {
-          // network error; leave uncached so it's retried on a later visit
+          // transient failure (rate limit, network): don't cache, retry later
+          job.attempts = (job.attempts || 0) + 1;
+          if (job.attempts < MAX_ATTEMPTS) {
+            setTimeout(() => {
+              queue.push(job);
+              pump();
+            }, 1500 * 2 ** job.attempts);
+          }
         })
         .finally(() => {
           activeFetches--;
