@@ -2,10 +2,11 @@
 // @name        gg.deals Steam Store Buttons
 // @namespace   https://github.com/kleutzinger/userscripts
 // @match       https://gg.deals/**
+// @exclude     /^https:\/\/gg\.deals\/([a-z]{2}\/?)?([?#].*)?$/
 // @downloadURL https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js
 // @updateURL   https://github.com/kleutzinger/userscripts/raw/main/userscripts/gg-deals-steam-buttons.user.js
 // @grant       none
-// @version     1.3
+// @version     1.4
 // @author      github.com/kleutzinger/
 // @description Adds a small "Steam" button directly on each game's thumbnail in gg.deals listings (bundle pages, search results, wishlists, etc.) that jumps straight to the Steam store page, without needing to open the gg.deals game page first.
 // @icon https://gg.deals/favicon.ico
